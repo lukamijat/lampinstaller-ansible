@@ -1,0 +1,110 @@
+---
+- name: LAMP Stack Setup
+  hosts: all
+  become: true
+  vars_prompt:
+    - name: "root_password"
+      prompt: "Enter the MySQL root password"
+      private: yes
+    - name: "username"
+      prompt: "Enter the new MySQL username"
+    - name: "user_password"
+      prompt: "Enter the new MySQL user password"
+      private: yes
+    - name: "database_name"
+      prompt: "Enter the new MySQL database name"
+
+  tasks:
+    - name: Update the package list
+      apt:
+        update_cache: yes
+
+    - name: Install MySQL server
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: Install Apache2
+      apt:
+        name: apache2
+        state: present
+
+    - name: Install PHP and required modules
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - php
+        - libapache2-mod-php
+        - php-mysql
+
+    - name: Restart Apache2 to load PHP module
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Set MySQL root password
+      mysql_user:
+        name: root
+        host: localhost
+        password: "{{ root_password }}"
+        check_implicit_admin: yes
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Drop existing MySQL user if it exists
+      mysql_user:
+        name: "{{ username }}"
+        host: "%"
+        state: absent
+        login_user: root
+        login_password: "{{ root_password }}"
+
+    - name: Create new MySQL user
+      mysql_user:
+        name: "{{ username }}"
+        password: "{{ user_password }}"
+        host: "%"
+        priv: "{{ database_name }}.*:ALL"
+        state: present
+        login_user: root
+        login_password: "{{ root_password }}"
+
+    - name: Create new MySQL database
+      mysql_db:
+        name: "{{ database_name }}"
+        state: present
+        login_user: root
+        login_password: "{{ root_password }}"
+
+    - name: Flush MySQL privileges
+      mysql_user:
+        name: root
+        host: localhost
+        password: "{{ root_password }}"
+        login_user: root
+        login_password: "{{ root_password }}"
+        check_implicit_admin: yes
+
+    - name: Restart MySQL service
+      systemd:
+        name: mysql
+        state: restarted
+
+    - name: Secure MySQL installation
+      command: mysql_secure_installation
+      ignore_errors: yes
+
+    - name: Create PHP info page
+      copy:
+        dest: /var/www/html/info.php
+        content: "<?php phpinfo(); ?>"
+
+    - name: Restart Apache2
+      systemd:
+        name: apache2
+        state: restarted
+
+  post_tasks:
+    - name: Display completion message
+      debug:
+        msg: "Apache, MySQL, and PHP are installed and configured. You can verify the PHP installation by visiting http://your_server_ip/info.php"
